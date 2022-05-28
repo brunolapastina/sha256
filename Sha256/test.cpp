@@ -23,8 +23,7 @@ static std::string load_file(const std::string_view filename)
    std::string content;
 
    FILE* fp{ nullptr };
-   auto ret = fopen_s(&fp, filename.data(), "r");
-   if (ret != 0)
+   if (auto ret = fopen_s(&fp, filename.data(), "r"); ret != 0)
    {
       throw std::runtime_error("Error opening file");
    }
@@ -46,16 +45,23 @@ static std::string load_file(const std::string_view filename)
 }
 
 
+constexpr std::byte ascii_to_nibble(const char ch)
+{
+   if ((ch >= '0') && (ch <= '9'))        return std::byte(ch - '0');
+   else if ((ch >= 'A') && (ch <= 'F'))   return std::byte(ch - 'A' + 10);
+   else if ((ch >= 'a') && (ch <= 'f'))   return std::byte(ch - 'a' + 10);
+   else throw std::domain_error("Invalid data");
+};
+
+
+constexpr uint8_t ascii_to_byte(const char ch1, const char ch2)
+{
+   return std::to_integer<uint8_t>((ascii_to_nibble(ch1) << 4) | ascii_to_nibble(ch2));
+}
+
+
 static std::vector<test_case_t> load_test_cases(const std::string_view filename)
 {
-   auto ascii_to_nibble = [](const char ch) -> uint8_t
-   {
-      if ((ch >= '0') && (ch <= '9'))        return ch - '0';
-      else if ((ch >= 'A') && (ch <= 'F'))   return ch - 'A' + 10;
-      else if ((ch >= 'a') && (ch <= 'f'))   return ch - 'a' + 10;
-      else throw std::runtime_error("Invalid data");
-   };
-
    const auto content = load_file(filename);
 
    size_t begin = 0;
@@ -81,24 +87,34 @@ static std::vector<test_case_t> load_test_cases(const std::string_view filename)
       {
          last_msg.clear();
          last_msg.reserve(expected_len);
-         for (size_t i = 6; (i < line.size()) && (last_msg.size() < expected_len); i += 2)
+         
+         // Make sure that the line length is not longer than the defined length
+         line.resize(std::min(line.size(), 6 + (expected_len * 2)));
+
+         // Make sure that the line length is a multiple of 2
+         line.resize(line.size() - (line.size() % 2));
+
+         for (size_t i = 6; i < line.size(); i += 2)
          {
-            last_msg.push_back((ascii_to_nibble(line[i]) << 4) | ascii_to_nibble(line[i + 1]));
+            last_msg.push_back(ascii_to_byte(line[i], line[i + 1]));
          }
       }
       else if (line.starts_with("MD = "))
       {
+         if (line.size() != 69)
+         {
+            throw std::domain_error("MD line has invalid length");
+         }
+
          std::array<uint8_t, 32> md{};
          for (size_t i = 5; i < line.size(); i += 2)
          {
-            md[(i - 5) / 2] = (ascii_to_nibble(line[i]) << 4) | ascii_to_nibble(line[i + 1]);
+            md[(i - 5) / 2] = ascii_to_byte(line[i], line[i + 1]);
          }
 
          test_cases.emplace_back(last_msg, md);
       }
    }
-
-   //printf("Loaded %zd test cases from '%s'\n", test_cases.size(), filename.data());
 
    return test_cases;
 }
@@ -111,6 +127,7 @@ static bool RunTests(const std::string_view label, const std::vector<test_case_t
    for (size_t i = 0; i < tests.size(); i++)
    {
       sha256_alg alg_tst;
+      
       if (byByte)
       {
          for (size_t j = 0; j < tests[i].msg.size(); j++)
@@ -122,12 +139,9 @@ static bool RunTests(const std::string_view label, const std::vector<test_case_t
       {
          alg_tst.update(tests[i].msg.data(), tests[i].msg.size());
       }
+
       const auto md = alg_tst.finish();
-      if (md == tests[i].md)
-      {
-         //printf("[%s #%-2lld] OK\n", label.data(), i+1);
-      }
-      else
+      if (md != tests[i].md)
       {
          printf("[%s #%-2lld] NOT OK\n", label.data(), i + 1);
          passed = false;
@@ -191,9 +205,12 @@ int main()
 
    const auto end = GetTickCount64();
 
+   printf("Calculated hash: ");
+   print_hash(md);
+
    constexpr auto total_size_in_mb = (bench_loop_times * bench_data_size) / (1024LL * 1024LL);
    const auto elapsed = end - begin;
-   printf("Processed %lld MB in %lld ms -> %f MB/s\n\n", total_size_in_mb, elapsed, (total_size_in_mb * 1000.0) / elapsed);
+   printf("Processed %lld MB in %lld ms -> %f MB/s\n\n", total_size_in_mb, elapsed, (total_size_in_mb * 1000.0) / static_cast<double>(elapsed));
 
    return 0;
 }
