@@ -1,11 +1,13 @@
 #include "sha256_alg.hpp"
 
+
 static constexpr uint32_t bswap_32(uint32_t x) noexcept
 {
    return std::is_constant_evaluated() ?
       ((x & 0x000000FF) << 24) | ((x & 0x0000FF00) << 8) | ((x & 0x00FF0000) >> 8) | ((x & 0xFF000000) >> 24) :
       _byteswap_ulong(x);
 }
+
 
 static constexpr uint64_t bswap_64(uint64_t x) noexcept
 {
@@ -14,25 +16,6 @@ static constexpr uint64_t bswap_64(uint64_t x) noexcept
       ((x & 0x000000ff00000000) >> 8) | ((x & 0x0000ff0000000000) >> 24) | ((x & 0x00ff000000000000) >> 40) | ((x & 0xff00000000000000) >> 56) :
       _byteswap_uint64(x);
 }
-
-#define ROTRIGHT(a,b)   (((a) >> (b)) | ((a) << (32-(b))))
-#define CH(x,y,z)       (((x) & (y)) ^ (~(x) & (z)))
-#define MAJ(x,y,z)      (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
-#define EP0(x)          (ROTRIGHT(x,2) ^ ROTRIGHT(x,13) ^ ROTRIGHT(x,22))
-#define EP1(x)          (ROTRIGHT(x,6) ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
-#define SIG0(x)         (ROTRIGHT(x,7) ^ ROTRIGHT(x,18) ^ ((x) >> 3))
-#define SIG1(x)         (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
-
-static constexpr std::array<uint32_t, 64> k{
-   0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-   0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-   0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-   0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-   0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-   0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-   0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-   0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-};
 
 
 void sha256_alg::update(const uint8_t* data, size_t len) noexcept
@@ -68,19 +51,18 @@ void sha256_alg::update(const uint8_t* data, size_t len) noexcept
 }
 
 
-std::array<uint8_t, 32> sha256_alg::finish() noexcept
+sha256_alg::result_t sha256_alg::finish() noexcept
 {
    auto i = rem_;
 
-   // Pad whatever data is left in the buffer.
    if (rem_ < 56)
-   {
+   {  // Padding can be done in one block
       buff_[i] = 0x80;
       ++i;
       memset(buff_.data() + i, 0, 56 - i);
    }
    else
-   {
+   {  //We'll need another block for padding
       buff_[i] = 0x80;
       ++i;
       memset(buff_.data() + i, 0, 64 - i);
@@ -90,12 +72,11 @@ std::array<uint8_t, 32> sha256_alg::finish() noexcept
 
    len_ += rem_;
 
-   // Append to the padding the total message's length in bits and transform.
+   // Append total message length in bits at the end
    const auto buff = std::bit_cast<uint64_t*>(buff_.data());
    buff[7] = bswap_64(len_ * 8);
    compress_block(buff_.data());
 
-   // This implementation assumes running on a Little endian machine
    state_[0] = bswap_32(state_[0]);
    state_[1] = bswap_32(state_[1]);
    state_[2] = bswap_32(state_[2]);
@@ -105,7 +86,54 @@ std::array<uint8_t, 32> sha256_alg::finish() noexcept
    state_[6] = bswap_32(state_[6]);
    state_[7] = bswap_32(state_[7]);
 
-   return std::bit_cast<std::array<uint8_t, 32>>(state_);
+   return std::bit_cast<sha256_alg::result_t>(state_);
+}
+
+
+static constexpr std::array<uint32_t, 64> k{
+   0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+   0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+   0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+   0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+   0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+   0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+   0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+   0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+};
+
+static constexpr uint32_t ROTRIGHT(const uint32_t a, const uint8_t b) noexcept
+{
+   return (a >> b) | (a << (32 - b));
+}
+
+static constexpr uint32_t CH(const uint32_t x, const uint32_t y, const uint32_t z) noexcept
+{
+   return (x & y) ^ (~x & z);
+}
+
+static constexpr uint32_t MAJ(const uint32_t x, const uint32_t y, const uint32_t z) noexcept
+{
+   return (x & y) ^ (x & z) ^ (y & z);
+}
+
+static constexpr uint32_t EP0(const uint32_t x) noexcept
+{
+   return ROTRIGHT(x, 2) ^ ROTRIGHT(x, 13) ^ ROTRIGHT(x, 22);
+}
+
+static constexpr uint32_t EP1(const uint32_t x) noexcept
+{
+   return ROTRIGHT(x, 6) ^ ROTRIGHT(x, 11) ^ ROTRIGHT(x, 25);
+}
+
+static constexpr uint32_t SIG0(const uint32_t x) noexcept
+{
+   return ROTRIGHT(x, 7) ^ ROTRIGHT(x, 18) ^ (x >> 3);
+}
+
+static constexpr uint32_t SIG1(const uint32_t x) noexcept
+{
+   return ROTRIGHT(x, 17) ^ ROTRIGHT(x, 19) ^ (x >> 10);
 }
 
 static constexpr void Round(
@@ -122,7 +150,7 @@ static constexpr void Round(
 
 constexpr void sha256_alg::compress_block(const uint8_t* data) noexcept
 {
-   std::array<uint32_t, 64> m{};
+   std::array<uint32_t, 64> m;   // This variable does not have to be initialized now. We will initialize as we need it
    uint32_t a = state_[0];
    uint32_t b = state_[1];
    uint32_t c = state_[2];
