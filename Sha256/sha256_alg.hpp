@@ -5,10 +5,20 @@
 class sha256_alg
 {
 public:
+   static constexpr size_t hash_size = 32;
+   using result_t = std::array<uint8_t, hash_size>;
+
    constexpr sha256_alg() = default;
 
    void update(const uint8_t* data, size_t len) noexcept;
-   std::array<uint8_t, 32> finish() noexcept;
+   result_t finish() noexcept;
+
+   static result_t hash(const uint8_t* data, size_t len) noexcept
+   {
+      sha256_alg alg;
+      alg.update(data, len);
+      return alg.finish();
+   }
 
 private:
    std::array<uint32_t, 8> state_{ 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
