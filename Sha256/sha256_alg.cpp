@@ -1,22 +1,27 @@
 #include "sha256_alg.hpp"
 
-#if defined(__GNUC__) && __GNUC__ >= 2
-static inline uint32_t bswap_32(uint32_t x) { return __builtin_bswap32(x); }
-static inline uint64_t bswap_64(uint64_t x) { return __builtin_bswap64(x); }
-#else
-static inline uint32_t bswap_32(uint32_t x) { return _byteswap_ulong(x); }
-static inline uint64_t bswap_64(uint64_t x) { return _byteswap_uint64(x); }
-#endif
+static constexpr uint32_t bswap_32(uint32_t x) noexcept
+{
+   return std::is_constant_evaluated() ?
+      ((x & 0x000000FF) << 24) | ((x & 0x0000FF00) << 8) | ((x & 0x00FF0000) >> 8) | ((x & 0xFF000000) >> 24) :
+      _byteswap_ulong(x);
+}
 
+static constexpr uint64_t bswap_64(uint64_t x) noexcept
+{
+   return std::is_constant_evaluated() ?
+      ((x & 0x00000000000000ff) << 56) | ((x & 0x000000000000ff00) << 40) | ((x & 0x0000000000ff0000) << 24) | ((x & 0x00000000ff000000) << 8) |
+      ((x & 0x000000ff00000000) >> 8) | ((x & 0x0000ff0000000000) >> 24) | ((x & 0x00ff000000000000) >> 40) | ((x & 0xff00000000000000) >> 56) :
+      _byteswap_uint64(x);
+}
 
-#define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32-(b))))
-
-#define CH(x,y,z) (((x) & (y)) ^ (~(x) & (z)))
-#define MAJ(x,y,z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
-#define EP0(x) (ROTRIGHT(x,2) ^ ROTRIGHT(x,13) ^ ROTRIGHT(x,22))
-#define EP1(x) (ROTRIGHT(x,6) ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
-#define SIG0(x) (ROTRIGHT(x,7) ^ ROTRIGHT(x,18) ^ ((x) >> 3))
-#define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
+#define ROTRIGHT(a,b)   (((a) >> (b)) | ((a) << (32-(b))))
+#define CH(x,y,z)       (((x) & (y)) ^ (~(x) & (z)))
+#define MAJ(x,y,z)      (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
+#define EP0(x)          (ROTRIGHT(x,2) ^ ROTRIGHT(x,13) ^ ROTRIGHT(x,22))
+#define EP1(x)          (ROTRIGHT(x,6) ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
+#define SIG0(x)         (ROTRIGHT(x,7) ^ ROTRIGHT(x,18) ^ ((x) >> 3))
+#define SIG1(x)         (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
 
 static constexpr std::array<uint32_t, 64> k{
    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
@@ -70,12 +75,14 @@ std::array<uint8_t, 32> sha256_alg::finish() noexcept
    // Pad whatever data is left in the buffer.
    if (rem_ < 56)
    {
-      buff_[i++] = 0x80;
+      buff_[i] = 0x80;
+      ++i;
       memset(buff_.data() + i, 0, 56 - i);
    }
    else
    {
-      buff_[i++] = 0x80;
+      buff_[i] = 0x80;
+      ++i;
       memset(buff_.data() + i, 0, 64 - i);
       compress_block(buff_.data());
       memset(buff_.data(), 0, i);
@@ -84,15 +91,8 @@ std::array<uint8_t, 32> sha256_alg::finish() noexcept
    len_ += rem_;
 
    // Append to the padding the total message's length in bits and transform.
-   const auto bitlen = len_ * 8;
-   buff_[63] = static_cast<uint8_t>(bitlen);
-   buff_[62] = static_cast<uint8_t>(bitlen >> 8);
-   buff_[61] = static_cast<uint8_t>(bitlen >> 16);
-   buff_[60] = static_cast<uint8_t>(bitlen >> 24);
-   buff_[59] = static_cast<uint8_t>(bitlen >> 32);
-   buff_[58] = static_cast<uint8_t>(bitlen >> 40);
-   buff_[57] = static_cast<uint8_t>(bitlen >> 48);
-   buff_[56] = static_cast<uint8_t>(bitlen >> 56);
+   const auto buff = std::bit_cast<uint64_t*>(buff_.data());
+   buff[7] = bswap_64(len_ * 8);
    compress_block(buff_.data());
 
    // This implementation assumes running on a Little endian machine
@@ -105,27 +105,24 @@ std::array<uint8_t, 32> sha256_alg::finish() noexcept
    state_[6] = bswap_32(state_[6]);
    state_[7] = bswap_32(state_[7]);
 
-   std::array<uint8_t, 32> md{};
-   memcpy(md.data(), state_.data(), sizeof(md));
+   return std::bit_cast<std::array<uint8_t, 32>>(state_);
+}
 
-   return md;
+static constexpr void Round(
+   const uint32_t a, const uint32_t b, const uint32_t c, uint32_t& d,
+   const uint32_t e, const uint32_t f, const uint32_t g, uint32_t& h,
+   const uint32_t k_val, const uint32_t m_val) noexcept
+{
+   const uint32_t t1 = h + EP1(e) + CH(e, f, g) + k_val + m_val;
+   const uint32_t t2 = EP0(a) + MAJ(a, b, c);
+   d += t1;
+   h = t1 + t2;
 }
 
 
-void sha256_alg::compress_block(const uint8_t* data) noexcept
+constexpr void sha256_alg::compress_block(const uint8_t* data) noexcept
 {
    std::array<uint32_t, 64> m{};
-
-   for (size_t i = 0; i < 16; ++i)
-   {
-      m[i] = bswap_32(reinterpret_cast<const uint32_t*>(data)[i]);
-   }
-
-   for (size_t i = 16; i < 64; ++i)
-   {
-      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
-   }
-
    uint32_t a = state_[0];
    uint32_t b = state_[1];
    uint32_t c = state_[2];
@@ -135,18 +132,76 @@ void sha256_alg::compress_block(const uint8_t* data) noexcept
    uint32_t g = state_[6];
    uint32_t h = state_[7];
 
-   for (size_t i = 0; i < 64; ++i)
+   const auto pdata = std::bit_cast<uint32_t*>(data);
+   for (size_t i = 0; i < 16; )
    {
-      const uint32_t t1 = h + EP1(e) + CH(e, f, g) + k[i] + m[i];
-      const uint32_t t2 = EP0(a) + MAJ(a, b, c);
-      h = g;
-      g = f;
-      f = e;
-      e = d + t1;
-      d = c;
-      c = b;
-      b = a;
-      a = t1 + t2;
+      m[i] = bswap_32(pdata[i]);
+      Round(a, b, c, d, e, f, g, h, k[i], m[i]);
+      ++i;
+
+      m[i] = bswap_32(pdata[i]);
+      Round(h, a, b, c, d, e, f, g, k[i], m[i]);
+      ++i;
+
+      m[i] = bswap_32(pdata[i]);
+      Round(g, h, a, b, c, d, e, f, k[i], m[i]);
+      ++i;
+
+      m[i] = bswap_32(pdata[i]);
+      Round(f, g, h, a, b, c, d, e, k[i], m[i]);
+      ++i;
+
+      m[i] = bswap_32(pdata[i]);
+      Round(e, f, g, h, a, b, c, d, k[i], m[i]);
+      ++i;
+
+      m[i] = bswap_32(pdata[i]);
+      Round(d, e, f, g, h, a, b, c, k[i], m[i]);
+      ++i;
+
+      m[i] = bswap_32(pdata[i]);
+      Round(c, d, e, f, g, h, a, b, k[i], m[i]);
+      ++i;
+
+      m[i] = bswap_32(pdata[i]);
+      Round(b, c, d, e, f, g, h, a, k[i], m[i]);
+      ++i;
+   }
+
+
+   for (size_t i = 16; i < 64; )
+   {
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(a, b, c, d, e, f, g, h, k[i], m[i]);
+      ++i;
+
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(h, a, b, c, d, e, f, g, k[i], m[i]);
+      ++i;
+
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(g, h, a, b, c, d, e, f, k[i], m[i]);
+      ++i;
+
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(f, g, h, a, b, c, d, e, k[i], m[i]);
+      ++i;
+
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(e, f, g, h, a, b, c, d, k[i], m[i]);
+      ++i;
+
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(d, e, f, g, h, a, b, c, k[i], m[i]);
+      ++i;
+
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(c, d, e, f, g, h, a, b, k[i], m[i]);
+      ++i;
+
+      m[i] = SIG1(m[i - 2]) + m[i - 7] + SIG0(m[i - 15]) + m[i - 16];
+      Round(b, c, d, e, f, g, h, a, k[i], m[i]);
+      ++i;
    }
 
    state_[0] += a;

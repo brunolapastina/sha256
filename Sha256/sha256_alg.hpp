@@ -17,5 +17,5 @@ private:
    size_t rem_{ 0 };
    std::array<uint8_t, 64> buff_{};
 
-   void compress_block(const uint8_t* data) noexcept;
+   constexpr void compress_block(const uint8_t* data) noexcept;
 };
