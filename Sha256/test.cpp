@@ -7,7 +7,6 @@
 #include <stdexcept>
 #include <string_view>
 #include <vector>
-#include <Windows.h>
 #include "sha256_alg.hpp"
 
 
@@ -22,8 +21,8 @@ static std::string load_file(const std::string_view filename)
 {
    std::string content;
 
-   FILE* fp{ nullptr };
-   if (auto ret = fopen_s(&fp, filename.data(), "r"); ret != 0)
+   FILE* fp = fopen(filename.data(), "r");
+   if (fp == nullptr)
    {
       throw std::runtime_error("Error opening file");
    }
@@ -116,6 +115,8 @@ static std::vector<test_case_t> load_test_cases(const std::string_view filename)
       }
    }
 
+   printf("Loaded %zd test cases from %s\n", test_cases.size(), filename.data());
+
    return test_cases;
 }
 
@@ -143,7 +144,7 @@ static bool RunTests(const std::string_view label, const std::vector<test_case_t
       const auto md = alg_tst.finish();
       if (md != tests[i].md)
       {
-         printf("[%s #%-2lld] NOT OK\n", label.data(), i + 1);
+         printf("[%s #%-2ld] NOT OK\n", label.data(), i + 1);
          passed = false;
       }
    }
@@ -161,6 +162,10 @@ static void print_hash(const std::array<uint8_t, 32>& md)
    printf("\n");
 }
 
+unsigned long long GetMillisecondsCount()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
 
 int main()
 {
@@ -194,7 +199,7 @@ int main()
    randData.reserve(bench_data_size);
    std::generate_n(std::back_inserter(randData), bench_data_size, [&distrib, &gen]() { return static_cast<uint8_t>(distrib(gen)); });
 
-   const auto begin = GetTickCount64();
+   const auto begin = GetMillisecondsCount();
 
    sha256_alg alg_tst;
    for (size_t i = 0; i < bench_loop_times; i++)
@@ -203,7 +208,7 @@ int main()
    }
    const auto md = alg_tst.finish();
 
-   const auto end = GetTickCount64();
+   const auto end = GetMillisecondsCount();
 
    printf("Calculated hash: ");
    print_hash(md);

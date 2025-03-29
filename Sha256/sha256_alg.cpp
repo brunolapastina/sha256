@@ -1,20 +1,53 @@
+#include <type_traits>
 #include "sha256_alg.hpp"
 
+#ifdef _MSC_VER
+   #include <stdlib.h>
+   #define bswap_32(x) _byteswap_ulong(x)
+   #define bswap_64(x) _byteswap_uint64(x)
+#elif defined(__APPLE__)
+   // Mac OS X / Darwin features
+   #include <libkern/OSByteOrder.h>
+   #define bswap_32(x) OSSwapInt32(x)
+   #define bswap_64(x) OSSwapInt64(x)
+#elif defined(__sun) || defined(sun)
+   #include <sys/byteorder.h>
+   #define bswap_32(x) BSWAP_32(x)
+   #define bswap_64(x) BSWAP_64(x)
+#elif defined(__FreeBSD__)
+   #include <sys/endian.h>
+   #define bswap_32(x) bswap32(x)
+   #define bswap_64(x) bswap64(x)
+#elif defined(__OpenBSD__)
+   #include <sys/types.h>
+   #define bswap_32(x) swap32(x)
+   #define bswap_64(x) swap64(x)
+#elif defined(__NetBSD__)
+   #include <sys/types.h>
+   #include <machine/bswap.h>
+   #if defined(__BSWAP_RENAME) && !defined(__bswap_32)
+      #define bswap_32(x) bswap32(x)
+      #define bswap_64(x) bswap64(x)
+   #endif
+#else
+   #include <byteswap.h>
+#endif
 
-static constexpr uint32_t bswap_32(uint32_t x) noexcept
+
+static constexpr uint32_t opt_bswap_32(uint32_t x) noexcept
 {
    return std::is_constant_evaluated() ?
       ((x & 0x000000FF) << 24) | ((x & 0x0000FF00) << 8) | ((x & 0x00FF0000) >> 8) | ((x & 0xFF000000) >> 24) :
-      _byteswap_ulong(x);
+      bswap_32(x);
 }
 
 
-static constexpr uint64_t bswap_64(uint64_t x) noexcept
+static constexpr uint64_t opt_bswap_64(uint64_t x) noexcept
 {
    return std::is_constant_evaluated() ?
       ((x & 0x00000000000000ff) << 56) | ((x & 0x000000000000ff00) << 40) | ((x & 0x0000000000ff0000) << 24) | ((x & 0x00000000ff000000) << 8) |
       ((x & 0x000000ff00000000) >> 8) | ((x & 0x0000ff0000000000) >> 24) | ((x & 0x00ff000000000000) >> 40) | ((x & 0xff00000000000000) >> 56) :
-      _byteswap_uint64(x);
+      bswap_64(x);
 }
 
 
@@ -74,17 +107,17 @@ sha256_alg::result_t sha256_alg::finish() noexcept
 
    // Append total message length in bits at the end
    const auto buff = std::bit_cast<uint64_t*>(buff_.data());
-   buff[7] = bswap_64(len_ * 8);
+   buff[7] = opt_bswap_64(len_ * 8);
    compress_block(buff_.data());
 
-   state_[0] = bswap_32(state_[0]);
-   state_[1] = bswap_32(state_[1]);
-   state_[2] = bswap_32(state_[2]);
-   state_[3] = bswap_32(state_[3]);
-   state_[4] = bswap_32(state_[4]);
-   state_[5] = bswap_32(state_[5]);
-   state_[6] = bswap_32(state_[6]);
-   state_[7] = bswap_32(state_[7]);
+   state_[0] = opt_bswap_32(state_[0]);
+   state_[1] = opt_bswap_32(state_[1]);
+   state_[2] = opt_bswap_32(state_[2]);
+   state_[3] = opt_bswap_32(state_[3]);
+   state_[4] = opt_bswap_32(state_[4]);
+   state_[5] = opt_bswap_32(state_[5]);
+   state_[6] = opt_bswap_32(state_[6]);
+   state_[7] = opt_bswap_32(state_[7]);
 
    return std::bit_cast<sha256_alg::result_t>(state_);
 }
@@ -163,35 +196,35 @@ constexpr void sha256_alg::compress_block(const uint8_t* data) noexcept
    const auto pdata = std::bit_cast<uint32_t*>(data);
    for (size_t i = 0; i < 16; )
    {
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(a, b, c, d, e, f, g, h, k[i], m[i]);
       ++i;
 
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(h, a, b, c, d, e, f, g, k[i], m[i]);
       ++i;
 
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(g, h, a, b, c, d, e, f, k[i], m[i]);
       ++i;
 
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(f, g, h, a, b, c, d, e, k[i], m[i]);
       ++i;
 
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(e, f, g, h, a, b, c, d, k[i], m[i]);
       ++i;
 
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(d, e, f, g, h, a, b, c, k[i], m[i]);
       ++i;
 
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(c, d, e, f, g, h, a, b, k[i], m[i]);
       ++i;
 
-      m[i] = bswap_32(pdata[i]);
+      m[i] = opt_bswap_32(pdata[i]);
       Round(b, c, d, e, f, g, h, a, k[i], m[i]);
       ++i;
    }
