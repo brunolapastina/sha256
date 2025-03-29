@@ -1,7 +1,9 @@
 # SHA256
 
 This is an SHA256implementation from scratch.
-My goal here was to have a SHA256 implementation that was portable and reasonable fast. 
+
+My goal here was to have a SHA256 implementation that was portable and reasonable fast.
+ 
 It is absolutly NOT the fastest you can get, but it should be preatty close to the fastest you can get without using intrinsics.
 
 The test vector come the the NIST`s CAVS 11.0
