@@ -151,11 +151,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="sha256_alg.cpp" />
-    <ClCompile Include="test.cpp" />
+    <ClCompile Include="src\sha256_alg.cpp" />
+    <ClCompile Include="tst\test.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="sha256_alg.hpp" />
+    <ClInclude Include="src\sha256_alg.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
